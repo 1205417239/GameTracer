@@ -263,6 +263,7 @@ static void monitor_timer_callback(NSTimer *timer) {
             float timeScale = get_time_static_float("timeScale");
             float maximumDeltaTime = get_time_static_float("maximumDeltaTime");
             float deltaTime = get_time_static_float("deltaTime");
+            float realtimeSinceStartup = get_time_static_float("realtimeSinceStartup");
             int targetFrameRate = get_application_static_int("targetFrameRate");
             int vSyncCount = get_quality_static_int("vSyncCount");
             
