@@ -2,10 +2,11 @@
 #import <UIKit/UIKit.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import <substrate.h>
 
 #pragma mark - IL2CPP 函数指针类型定义
 typedef void* (*il2cpp_domain_get_t)(void);
-typedef void* (*il2cpp_domain_get_assemblies_t)(void* domain, size_t* size);
+typedef void** (*il2cpp_domain_get_assemblies_t)(void* domain, size_t* size);
 typedef void* (*il2cpp_assembly_get_image_t)(void* assembly);
 typedef void* (*il2cpp_class_from_name_t)(void* image, const char* namespaze, const char* name);
 typedef void* (*il2cpp_class_get_methods_t)(void* klass, void* iter);
@@ -64,8 +65,8 @@ static void writeLog(NSString *format, ...) {
 static void* get_il2cpp_func(const char *name) {
     void *handle = dlopen("/usr/lib/libil2cpp.dylib", RTLD_LAZY);
     if (!handle) {
-        // 尝试从 UnityFramework 中查找
-        handle = dlopen(null, RTLD_LAZY);
+        // 尝试从主程序中查找
+        handle = dlopen(NULL, RTLD_LAZY);
     }
     if (handle) {
         return dlsym(handle, name);
@@ -164,7 +165,7 @@ static void check_time_changes(void) {
         g_last_timeScale = timeScale;
     }
     if (maximumDeltaTime >= 0 && fabs(maximumDeltaTime - g_last_maximumDeltaTime) > 0.001) {
-        writeLog(@"[时间变化] maximumDeltaTime: %.4f -> %.4f (帧时间上限，决定加速上限)", g_last_maximumDeltaTime, maximumDeltaTime);
+        writeLog(@"[时间变化] maximumDeltaTime: %.4f -> %.4f (帧时间上限，决定加速上限) 当前deltaTime=%.4f", g_last_maximumDeltaTime, maximumDeltaTime, deltaTime);
         g_last_maximumDeltaTime = maximumDeltaTime;
     }
     if (targetFrameRate != g_last_targetFrameRate) {
