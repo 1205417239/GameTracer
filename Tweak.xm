@@ -387,77 +387,94 @@ static void monitor_timer_callback(NSTimer *timer) {
 
 #pragma mark - 初始化
 static TracerFloatingButton *g_floating_button = nil;
+static BOOL g_initialized = NO;
 
-static void __attribute__((constructor)) initialize(void) {
-    @autoreleasepool {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            @try {
-                g_method_call_count = [NSMutableDictionary dictionary];
-                g_time_changes = [NSMutableArray array];
-                
-                writeLog(@"GameTracer 插件加载");
-                
-                // 查找 IL2CPP 镜像
-                il2cpp_domain_get_t domain_get = (il2cpp_domain_get_t)get_il2cpp_func("il2cpp_domain_get");
-                il2cpp_domain_get_assemblies_t domain_get_assemblies = (il2cpp_domain_get_assemblies_t)get_il2cpp_func("il2cpp_domain_get_assemblies");
-                il2cpp_assembly_get_image_t assembly_get_image = (il2cpp_assembly_get_image_t)get_il2cpp_func("il2cpp_assembly_get_image");
-                
-                if (domain_get && domain_get_assemblies && assembly_get_image) {
-                    void *domain = domain_get();
-                    size_t asm_count = 0;
-                    void **assemblies = domain_get_assemblies(domain, &asm_count);
-                    writeLog(@"找到 %zu 个程序集", asm_count);
-                    
-                    for (size_t i = 0; i < asm_count; i++) {
-                        void *image = assembly_get_image(assemblies[i]);
-                        if (image) {
-                            // 尝试查找 Time 类
-                            il2cpp_class_from_name_t class_from_name = (il2cpp_class_from_name_t)get_il2cpp_func("il2cpp_class_from_name");
-                            if (class_from_name) {
-                                void *timeClass = class_from_name(image, "UnityEngine", "Time");
-                                if (timeClass) {
-                                    il2cpp_image = image;
-                                    writeLog(@"找到 Unity 镜像，Time 类在程序集 %zu", i);
-                                    break;
-                                }
-                            }
+static void do_initialize(void) {
+    if (g_initialized) return;
+    g_initialized = YES;
+    
+    @try {
+        g_method_call_count = [NSMutableDictionary dictionary];
+        g_time_changes = [NSMutableArray array];
+        
+        writeLog(@"GameTracer 插件加载（延迟初始化）");
+        
+        // 查找 IL2CPP 镜像
+        il2cpp_domain_get_t domain_get = (il2cpp_domain_get_t)get_il2cpp_func("il2cpp_domain_get");
+        il2cpp_domain_get_assemblies_t domain_get_assemblies = (il2cpp_domain_get_assemblies_t)get_il2cpp_func("il2cpp_domain_get_assemblies");
+        il2cpp_assembly_get_image_t assembly_get_image = (il2cpp_assembly_get_image_t)get_il2cpp_func("il2cpp_assembly_get_image");
+        
+        if (domain_get && domain_get_assemblies && assembly_get_image) {
+            void *domain = domain_get();
+            size_t asm_count = 0;
+            void **assemblies = domain_get_assemblies(domain, &asm_count);
+            writeLog(@"找到 %zu 个程序集", asm_count);
+            
+            for (size_t i = 0; i < asm_count; i++) {
+                void *image = assembly_get_image(assemblies[i]);
+                if (image) {
+                    il2cpp_class_from_name_t class_from_name = (il2cpp_class_from_name_t)get_il2cpp_func("il2cpp_class_from_name");
+                    if (class_from_name) {
+                        void *timeClass = class_from_name(image, "UnityEngine", "Time");
+                        if (timeClass) {
+                            il2cpp_image = image;
+                            writeLog(@"找到 Unity 镜像，Time 类在程序集 %zu", i);
+                            break;
                         }
                     }
                 }
-                
-                // hook il2cpp_runtime_invoke
-                orig_il2cpp_runtime_invoke = (il2cpp_runtime_invoke_t)get_il2cpp_func("il2cpp_runtime_invoke");
-                if (orig_il2cpp_runtime_invoke) {
-                    MSHookFunction((void *)orig_il2cpp_runtime_invoke, (void *)hook_il2cpp_runtime_invoke, (void **)&orig_il2cpp_runtime_invoke);
-                    writeLog(@"il2cpp_runtime_invoke hook 成功");
-                } else {
-                    writeLog(@"未找到 il2cpp_runtime_invoke");
-                }
-                
-                // 启动定时监控
-                g_monitor_timer = [NSTimer scheduledTimerWithTimeInterval:2.0 target:[NSObject class] selector:@selector(monitor_timer_callback:) userInfo:nil repeats:YES];
-                [[NSRunLoop mainRunLoop] addTimer:g_monitor_timer forMode:NSRunLoopCommonModes];
-                
-                // 显示悬浮按钮
-                CGSize screenSize = [UIScreen mainScreen].bounds.size;
-                g_floating_button = [[TracerFloatingButton alloc] initWithFrame:CGRectMake(screenSize.width - 80, 200, 60, 60)];
-                [g_floating_button makeKeyAndVisible];
-                
-                writeLog(@"GameTracer 初始化完成，悬浮按钮已显示");
-                
-                // 初始状态快照
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    check_time_changes();
-                    float timeScale = get_time_static_float("timeScale");
-                    float maximumDeltaTime = get_time_static_float("maximumDeltaTime");
-                    int targetFrameRate = get_application_static_int("targetFrameRate");
-                    int vSyncCount = get_quality_static_int("vSyncCount");
-                    writeLog(@"[初始状态] timeScale=%.3f, maxDeltaTime=%.4f, targetFPS=%d, vSync=%d", timeScale, maximumDeltaTime, targetFrameRate, vSyncCount);
-                });
-                
-            } @catch (NSException *e) {
-                NSLog(@"GameTracer 初始化异常: %@", e);
             }
+        }
+        
+        // hook il2cpp_runtime_invoke
+        orig_il2cpp_runtime_invoke = (il2cpp_runtime_invoke_t)get_il2cpp_func("il2cpp_runtime_invoke");
+        if (orig_il2cpp_runtime_invoke) {
+            MSHookFunction((void *)orig_il2cpp_runtime_invoke, (void *)hook_il2cpp_runtime_invoke, (void **)&orig_il2cpp_runtime_invoke);
+            writeLog(@"il2cpp_runtime_invoke hook 成功");
+        } else {
+            writeLog(@"未找到 il2cpp_runtime_invoke");
+        }
+        
+        // 启动定时监控
+        g_monitor_timer = [NSTimer scheduledTimerWithTimeInterval:2.0 target:[NSObject class] selector:@selector(monitor_timer_callback:) userInfo:nil repeats:YES];
+        [[NSRunLoop mainRunLoop] addTimer:g_monitor_timer forMode:NSRunLoopCommonModes];
+        
+        // 显示悬浮按钮
+        CGSize screenSize = [UIScreen mainScreen].bounds.size;
+        g_floating_button = [[TracerFloatingButton alloc] initWithFrame:CGRectMake(screenSize.width - 80, 200, 60, 60)];
+        [g_floating_button makeKeyAndVisible];
+        
+        writeLog(@"GameTracer 初始化完成，悬浮按钮已显示");
+        
+        // 初始状态快照
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            check_time_changes();
+            float timeScale = get_time_static_float("timeScale");
+            float maximumDeltaTime = get_time_static_float("maximumDeltaTime");
+            int targetFrameRate = get_application_static_int("targetFrameRate");
+            int vSyncCount = get_quality_static_int("vSyncCount");
+            writeLog(@"[初始状态] timeScale=%.3f, maxDeltaTime=%.4f, targetFPS=%d, vSync=%d", timeScale, maximumDeltaTime, targetFrameRate, vSyncCount);
+        });
+        
+    } @catch (NSException *e) {
+        NSLog(@"GameTracer 初始化异常: %@", e);
+        writeLog(@"初始化异常: %@", e);
+    }
+}
+
+static void __attribute__((constructor)) initialize(void) {
+    @autoreleasepool {
+        // 延迟到游戏启动完成后再初始化，避免启动看门狗超时
+        // 监听 UIApplicationDidFinishLaunchingNotification，启动完成后 5 秒再初始化
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                do_initialize();
+            });
+        }];
+        
+        // 兜底：如果 15 秒后还没初始化（可能没有收到启动通知），直接初始化
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            do_initialize();
         });
     }
 }
