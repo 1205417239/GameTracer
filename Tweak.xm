@@ -191,63 +191,6 @@ static void check_time_changes(void) {
     }
 }
 
-#pragma mark - hook il2cpp_runtime_invoke
-static void* hook_il2cpp_runtime_invoke(void* method, void* obj, void** params, void** exc) {
-    if (!g_tracer_enabled || !method || !g_funcs_cached) {
-        return orig_il2cpp_runtime_invoke(method, obj, params, exc);
-    }
-    
-    // 只记录关键类的方法调用（用缓存的函数指针，避免每次 dlsym）
-    const char *methodName = g_method_get_name ? g_method_get_name(method) : NULL;
-    if (!methodName) {
-        return orig_il2cpp_runtime_invoke(method, obj, params, exc);
-    }
-    
-    // 快速过滤：只处理包含关键词的方法名
-    BOOL isImportant = NO;
-    if (strstr(methodName, "timeScale") ||
-        strstr(methodName, "deltaTime") ||
-        strstr(methodName, "maximumDeltaTime") ||
-        strstr(methodName, "targetFrameRate") ||
-        strstr(methodName, "vSyncCount") ||
-        strstr(methodName, "set_time") ||
-        strstr(methodName, "get_time") ||
-        strstr(methodName, "Time") ||
-        strstr(methodName, "Speed") ||
-        strstr(methodName, "Accelerat")) {
-        isImportant = YES;
-    }
-    
-    if (!isImportant) {
-        return orig_il2cpp_runtime_invoke(method, obj, params, exc);
-    }
-    
-    // 获取类名（只对重要方法获取）
-    void *klass = g_method_get_class ? g_method_get_class(method) : NULL;
-    const char *className = (klass && g_class_get_name) ? g_class_get_name(klass) : "unknown";
-    
-    // 只记录 Time/Application/QualitySettings 类的方法
-    if (strcmp(className, "Time") != 0 &&
-        strcmp(className, "Application") != 0 &&
-        strcmp(className, "QualitySettings") != 0) {
-        return orig_il2cpp_runtime_invoke(method, obj, params, exc);
-    }
-    
-    g_invoke_count++;
-    
-    // 用内存字典记录调用次数，不直接写文件（异步写）
-    NSString *key = [NSString stringWithFormat:@"%s.%s", className, methodName];
-    @synchronized (g_method_call_count) {
-        NSNumber *count = g_method_call_count[key];
-        g_method_call_count[key] = @([count intValue] + 1);
-    }
-    
-    // 执行原函数
-    void *result = orig_il2cpp_runtime_invoke(method, obj, params, exc);
-    
-    return result;
-}
-
 #pragma mark - 定时监控
 static NSTimer *g_monitor_timer = nil;
 
@@ -271,16 +214,7 @@ static void monitor_timer_callback(NSTimer *timer) {
                      timeScale, maximumDeltaTime, deltaTime, realtimeSinceStartup, targetFrameRate, vSyncCount,
                      (maximumDeltaTime > 0 && deltaTime > 0) ? maximumDeltaTime / deltaTime : 0);
             
-            // 输出调用次数最多的方法
-            NSArray *sorted = [g_method_call_count keysSortedByValueUsingComparator:^NSComparisonResult(id obj1, id obj2) {
-                return [obj2 compare:obj1];
-            }];
-            int count = 0;
-            for (NSString *key in sorted) {
-                if (count >= 10) break;
-                writeLog(@"[调用统计] %@: %d次", key, [g_method_call_count[key] intValue]);
-                count++;
-            }
+            // 不 hook il2cpp_runtime_invoke，无调用统计
         }
     }
 }
@@ -439,14 +373,8 @@ static void do_initialize(void) {
             }
         }
         
-        // hook il2cpp_runtime_invoke
-        orig_il2cpp_runtime_invoke = (il2cpp_runtime_invoke_t)get_il2cpp_func("il2cpp_runtime_invoke");
-        if (orig_il2cpp_runtime_invoke) {
-            MSHookFunction((void *)orig_il2cpp_runtime_invoke, (void *)hook_il2cpp_runtime_invoke, (void **)&orig_il2cpp_runtime_invoke);
-            writeLog(@"il2cpp_runtime_invoke hook 成功");
-        } else {
-            writeLog(@"未找到 il2cpp_runtime_invoke");
-        }
+        // 不 hook il2cpp_runtime_invoke（避免反作弊检测导致崩溃），只靠定时轮询获取时间属性
+        writeLog(@"使用定时轮询模式，不 hook il2cpp_runtime_invoke");
         
         // 启动定时监控
         g_monitor_timer = [NSTimer scheduledTimerWithTimeInterval:2.0 target:[NSObject class] selector:@selector(monitor_timer_callback:) userInfo:nil repeats:YES];
