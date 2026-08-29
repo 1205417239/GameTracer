@@ -21,6 +21,7 @@ typedef void* (*il2cpp_field_get_value_t)(void* obj, void* field);
 typedef void* (*il2cpp_class_get_field_from_name_t)(void* klass, const char* name);
 typedef const char* (*il2cpp_field_get_name_t)(void* field);
 typedef int (*il2cpp_field_get_type_t)(void* field);
+typedef void* (*il2cpp_class_get_method_from_name_t)(void* klass, const char* name, int argsCount);
 
 #pragma mark - 全局变量
 static il2cpp_runtime_invoke_t orig_il2cpp_runtime_invoke = NULL;
@@ -46,6 +47,7 @@ static il2cpp_object_unbox_t g_object_unbox = NULL;
 static il2cpp_domain_get_t g_domain_get = NULL;
 static il2cpp_domain_get_assemblies_t g_domain_get_assemblies = NULL;
 static il2cpp_assembly_get_image_t g_assembly_get_image = NULL;
+static il2cpp_class_get_method_from_name_t g_class_get_method_from_name = NULL;
 static BOOL g_funcs_cached = NO;
 
 // 前向声明
@@ -66,6 +68,11 @@ static void cache_il2cpp_funcs(void) {
     g_domain_get = (il2cpp_domain_get_t)get_il2cpp_func("il2cpp_domain_get");
     g_domain_get_assemblies = (il2cpp_domain_get_assemblies_t)get_il2cpp_func("il2cpp_domain_get_assemblies");
     g_assembly_get_image = (il2cpp_assembly_get_image_t)get_il2cpp_func("il2cpp_assembly_get_image");
+    g_class_get_method_from_name = (il2cpp_class_get_method_from_name_t)get_il2cpp_func("il2cpp_class_get_method_from_name");
+    // 获取 runtime_invoke 函数指针（不 hook，只用于调用 getter 方法）
+    if (!orig_il2cpp_runtime_invoke) {
+        orig_il2cpp_runtime_invoke = (il2cpp_runtime_invoke_t)get_il2cpp_func("il2cpp_runtime_invoke");
+    }
 }
 
 #pragma mark - 日志文件
@@ -122,45 +129,64 @@ static void* find_unity_class(const char *name) {
 }
 
 #pragma mark - 获取 Time 类静态字段值
-static float get_time_static_float(const char *fieldName) {
+static float get_time_static_float(const char *propertyName) {
     void *timeClass = find_unity_class("Time");
-    if (!timeClass || !g_class_get_field_from_name || !g_field_get_value || !g_object_unbox) return -1;
+    if (!timeClass || !g_class_get_method_from_name || !orig_il2cpp_runtime_invoke || !g_object_unbox) return -1;
     
-    void *field = g_class_get_field_from_name(timeClass, fieldName);
-    if (!field) return -1;
+    // 尝试 getter 方法名：get_xxx 和 xxx
+    char methodName[128];
+    void *method = NULL;
     
-    void *value = g_field_get_value(NULL, field);
-    if (!value) return -1;
+    snprintf(methodName, sizeof(methodName), "get_%s", propertyName);
+    method = g_class_get_method_from_name(timeClass, methodName, 0);
+    if (!method) {
+        method = g_class_get_method_from_name(timeClass, propertyName, 0);
+    }
+    if (!method) return -1;
     
-    float *fval = (float *)g_object_unbox(value);
+    void *exc = NULL;
+    void *result = orig_il2cpp_runtime_invoke(method, NULL, NULL, &exc);
+    if (!result || exc) return -1;
+    
+    float *fval = (float *)g_object_unbox(result);
     return fval ? *fval : -1;
 }
 
-static int get_application_static_int(const char *fieldName) {
+static int get_application_static_int(const char *propertyName) {
     void *appClass = find_unity_class("Application");
-    if (!appClass || !g_class_get_field_from_name || !g_field_get_value || !g_object_unbox) return -1;
+    if (!appClass || !g_class_get_method_from_name || !orig_il2cpp_runtime_invoke || !g_object_unbox) return -1;
     
-    void *field = g_class_get_field_from_name(appClass, fieldName);
-    if (!field) return -1;
+    char methodName[128];
+    void *method = NULL;
+    snprintf(methodName, sizeof(methodName), "get_%s", propertyName);
+    method = g_class_get_method_from_name(appClass, methodName, 0);
+    if (!method) method = g_class_get_method_from_name(appClass, propertyName, 0);
+    if (!method) return -1;
     
-    void *value = g_field_get_value(NULL, field);
-    if (!value) return -1;
+    void *exc = NULL;
+    void *result = orig_il2cpp_runtime_invoke(method, NULL, NULL, &exc);
+    if (!result || exc) return -1;
     
-    int *ival = (int *)g_object_unbox(value);
+    int *ival = (int *)g_object_unbox(result);
     return ival ? *ival : -1;
 }
 
-static int get_quality_static_int(const char *fieldName) {
+static int get_quality_static_int(const char *propertyName) {
     void *qClass = find_unity_class("QualitySettings");
-    if (!qClass || !g_class_get_field_from_name || !g_field_get_value || !g_object_unbox) return -1;
+    if (!qClass || !g_class_get_method_from_name || !orig_il2cpp_runtime_invoke || !g_object_unbox) return -1;
     
-    void *field = g_class_get_field_from_name(qClass, fieldName);
-    if (!field) return -1;
+    char methodName[128];
+    void *method = NULL;
+    snprintf(methodName, sizeof(methodName), "get_%s", propertyName);
+    method = g_class_get_method_from_name(qClass, methodName, 0);
+    if (!method) method = g_class_get_method_from_name(qClass, propertyName, 0);
+    if (!method) return -1;
     
-    void *value = g_field_get_value(NULL, field);
-    if (!value) return -1;
+    void *exc = NULL;
+    void *result = orig_il2cpp_runtime_invoke(method, NULL, NULL, &exc);
+    if (!result || exc) return -1;
     
-    int *ival = (int *)g_object_unbox(value);
+    int *ival = (int *)g_object_unbox(result);
     return ival ? *ival : -1;
 }
 
