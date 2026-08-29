@@ -48,6 +48,9 @@ static il2cpp_domain_get_assemblies_t g_domain_get_assemblies = NULL;
 static il2cpp_assembly_get_image_t g_assembly_get_image = NULL;
 static BOOL g_funcs_cached = NO;
 
+// 前向声明
+static void* get_il2cpp_func(const char *name);
+
 static void cache_il2cpp_funcs(void) {
     if (g_funcs_cached) return;
     g_funcs_cached = YES;
@@ -263,8 +266,8 @@ static void monitor_timer_callback(NSTimer *timer) {
             int targetFrameRate = get_application_static_int("targetFrameRate");
             int vSyncCount = get_quality_static_int("vSyncCount");
             
-            writeLog(@"[状态快照] timeScale=%.3f, maxDeltaTime=%.4f, deltaTime=%.4f, targetFPS=%d, vSync=%d, 理论加速上限=%.1fx",
-                     timeScale, maximumDeltaTime, deltaTime, targetFrameRate, vSyncCount,
+            writeLog(@"[状态快照] timeScale=%.3f, maxDeltaTime=%.4f, deltaTime=%.4f, realtime=%.1f, targetFPS=%d, vSync=%d, 理论加速上限=%.1fx",
+                     timeScale, maximumDeltaTime, deltaTime, realtimeSinceStartup, targetFrameRate, vSyncCount,
                      (maximumDeltaTime > 0 && deltaTime > 0) ? maximumDeltaTime / deltaTime : 0);
             
             // 输出调用次数最多的方法
