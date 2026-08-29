@@ -312,9 +312,8 @@ static void monitor_timer_callback(NSTimer *timer) {
             break;
         }
         case 3: { // 关闭
+            g_tracer_enabled = NO; // 停止定时器
             self.hidden = YES;
-            [g_monitor_timer invalidate];
-            g_monitor_timer = nil;
             break;
         }
     }
@@ -376,9 +375,24 @@ static void do_initialize(void) {
         // 不 hook il2cpp_runtime_invoke（避免反作弊检测导致崩溃），只靠定时轮询获取时间属性
         writeLog(@"使用定时轮询模式，不 hook il2cpp_runtime_invoke");
         
-        // 启动定时监控
-        g_monitor_timer = [NSTimer scheduledTimerWithTimeInterval:2.0 target:[NSObject class] selector:@selector(monitor_timer_callback:) userInfo:nil repeats:YES];
-        [[NSRunLoop mainRunLoop] addTimer:g_monitor_timer forMode:NSRunLoopCommonModes];
+        // 启动定时监控（用递归 dispatch_after，避免 NSTimer 的 unrecognized selector 崩溃）
+        static BOOL timerRunning = NO;
+        if (!timerRunning) {
+            timerRunning = YES;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __block void (^timerBlock)(void);
+                timerBlock = ^{
+                    if (!g_tracer_enabled) { timerRunning = NO; return; }
+                    @try {
+                        monitor_timer_callback(nil);
+                    } @catch (NSException *e) {
+                        NSLog(@"GameTracer timer exception: %@", e);
+                    }
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), timerBlock);
+                };
+                timerBlock();
+            });
+        }
         
         // 显示悬浮按钮
         CGSize screenSize = [UIScreen mainScreen].bounds.size;
