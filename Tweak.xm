@@ -394,25 +394,71 @@ static void do_initialize(void) {
         
         writeLog(@"GameTracer 插件加载（延迟初始化+函数指针缓存）");
         
-        // 查找 IL2CPP 镜像
+        // 查找 IL2CPP 镜像（详细调试+多种类名尝试）
         if (g_domain_get && g_domain_get_assemblies && g_assembly_get_image && g_class_from_name) {
             void *domain = g_domain_get();
             size_t asm_count = 0;
             void **assemblies = g_domain_get_assemblies(domain, &asm_count);
-            writeLog(@"找到 %zu 个程序集", asm_count);
+            writeLog(@"[调试] 找到 %zu 个程序集", asm_count);
             
-            for (size_t i = 0; i < asm_count; i++) {
+            // 尝试的类名组合
+            const char *class_attempts[][2] = {
+                {"UnityEngine", "Time"},
+                {"", "Time"},
+                {"UnityEngine.CoreModule", "Time"},
+                {"UnityEngine", "UnityEngine.Time"},
+                {NULL, NULL}
+            };
+            
+            for (size_t i = 0; i < asm_count && !il2cpp_image; i++) {
                 void *image = g_assembly_get_image(assemblies[i]);
-                if (image) {
-                    void *timeClass = g_class_from_name(image, "UnityEngine", "Time");
+                if (!image) continue;
+                
+                for (int j = 0; class_attempts[j][0]; j++) {
+                    void *timeClass = g_class_from_name(image, class_attempts[j][0], class_attempts[j][1]);
                     if (timeClass) {
                         il2cpp_image = image;
-                        writeLog(@"找到 Unity 镜像，Time 类在程序集 %zu", i);
+                        const char *ns = g_class_get_namespace ? g_class_get_namespace(timeClass) : "?";
+                        const char *cn = g_class_get_name ? g_class_get_name(timeClass) : "?";
+                        writeLog(@"[调试] 找到 Time 类! 程序集 %zu, 命名空间='%s', 类名='%s'", i, ns, cn);
+                        
+                        // 测试字段是否能找到
+                        if (g_class_get_field_from_name) {
+                            const char *fields[] = {"timeScale", "m_timeScale", "maximumDeltaTime", "m_maximumDeltaTime", "deltaTime", "m_deltaTime", "realtimeSinceStartup", NULL};
+                            for (int k = 0; fields[k]; k++) {
+                                void *field = g_class_get_field_from_name(timeClass, fields[k]);
+                                writeLog(@"[调试] 字段 '%s' -> %@", fields[k], field ? @"找到" : @"未找到");
+                            }
+                        }
                         break;
                     }
                 }
             }
+            
+            if (!il2cpp_image) {
+                writeLog(@"[调试] 未找到 Time 类，尝试遍历所有程序集的所有类...");
+                // 如果找不到，用第一个非空 image 作为 fallback
+                for (size_t i = 0; i < asm_count; i++) {
+                    void *image = g_assembly_get_image(assemblies[i]);
+                    if (image) {
+                        il2cpp_image = image;
+                        writeLog(@"[调试] 使用 fallback image (程序集 %zu)", i);
+                        break;
+                    }
+                }
+            }
+        } else {
+            writeLog(@"[调试] IL2CPP 函数不完整: domain_get=%d, domain_get_assemblies=%d, assembly_get_image=%d, class_from_name=%d",
+                     g_domain_get != NULL, g_domain_get_assemblies != NULL, g_assembly_get_image != NULL, g_class_from_name != NULL);
         }
+        
+        writeLog(@"[调试] il2cpp_image=%@", il2cpp_image ? @"已设置" : @"NULL");
+        
+        // 初始化时测试读取
+        float test_ts = get_time_static_float("timeScale");
+        float test_mdt = get_time_static_float("maximumDeltaTime");
+        float test_dt = get_time_static_float("deltaTime");
+        writeLog(@"[调试] 初始读取测试: timeScale=%.3f, maxDeltaTime=%.4f, deltaTime=%.4f", test_ts, test_mdt, test_dt);
         
         // 不 hook il2cpp_runtime_invoke（避免反作弊检测导致崩溃），只靠定时轮询获取时间属性
         writeLog(@"使用定时轮询模式，不 hook il2cpp_runtime_invoke");
