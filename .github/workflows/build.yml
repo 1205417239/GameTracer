@@ -1,0 +1,81 @@
+name: Build GameTracer
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install ldid xz make dpkg
+          echo "PATH=$(brew --prefix make)/libexec/gnubin:$PATH" >> $GITHUB_ENV
+
+      - name: Install Theos
+        run: |
+          export THEOS=$HOME/theos
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+
+      - name: Setup Xcode SDK
+        run: |
+          export THEOS=$HOME/theos
+          mkdir -p $THEOS/sdks
+          # 使用 Xcode 自带的 iOS SDK
+          xcodebuild -showsdks 2>/dev/null | grep -i iphone
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
+          SDK_NAME=$(basename "$SDK_PATH")
+          echo "Using SDK: $SDK_NAME at $SDK_PATH"
+          ln -sf "$SDK_PATH" "$THEOS/sdks/$SDK_NAME"
+          ls -la $THEOS/sdks/
+
+      - name: Build package
+        run: |
+          export THEOS=$HOME/theos
+          make clean
+          make package FINALPACKAGE=1
+        working-directory: ${{ github.workspace }}
+
+      - name: Extract dylib from deb
+        run: |
+          mkdir -p output
+          # 复制 deb 包
+          cp packages/*.deb output/ 2>/dev/null || echo "No deb found in packages/"
+          # 从 deb 解包提取 dylib
+          cd output
+          for deb in *.deb; do
+            [ -f "$deb" ] && dpkg-deb -x "$deb" extracted/ 2>/dev/null
+          done
+          find extracted -name "*.dylib" -exec cp {} . \; 2>/dev/null
+          # 后备：直接从编译目录找 dylib
+          cd ..
+          find .theos -name "*.dylib" -exec cp {} output/ \; 2>/dev/null
+          ls -la output/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTracer-build
+          path: |
+            output/*.deb
+            output/*.dylib
+          retention-days: 30
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            output/*.deb
+            output/*.dylib
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

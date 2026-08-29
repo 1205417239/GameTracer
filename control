@@ -1,0 +1,9 @@
+Package: com.gametracer.tweak
+Name: GameTracer
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: IL2CPP Runtime Method Tracer
+Maintainer: GameTracer
+Author: GameTracer
+Section: Tweaks
+Depends: firmware (>=14.0)
