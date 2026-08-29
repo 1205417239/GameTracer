@@ -222,7 +222,6 @@ static void monitor_timer_callback(NSTimer *timer) {
 #pragma mark - 悬浮按钮
 @interface TracerFloatingButton : UIWindow
 @property (nonatomic, strong) UIButton *button;
-@property (nonatomic, assign) BOOL isExpanded;
 @end
 
 @implementation TracerFloatingButton
@@ -253,78 +252,89 @@ static void monitor_timer_callback(NSTimer *timer) {
 }
 
 - (void)buttonTapped {
-    self.isExpanded = !self.isExpanded;
-    
-    if (self.isExpanded) {
-        // 展开菜单
-        self.button.frame = CGRectMake(0, 0, 200, 200);
-        self.button.layer.cornerRadius = 20;
+    @try {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"GameTracer 抓取工具" message:@"选择操作" preferredStyle:UIAlertControllerStyleActionSheet];
         
-        // 清除所有子视图
-        for (UIView *v in self.button.subviews) {
-            [v removeFromSuperview];
-        }
+        [alert addAction:[UIAlertAction actionWithTitle:@"导出日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [self exportLog];
+        }]];
         
-        NSArray *titles = @[@"导出日志", @"清空日志", @"开启/暂停", @"关闭"];
-        for (int i = 0; i < titles.count; i++) {
-            UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-            btn.frame = CGRectMake(10, 10 + i * 45, 180, 40);
-            [btn setTitle:titles[i] forState:UIControlStateNormal];
-            btn.backgroundColor = [UIColor whiteColor];
-            btn.layer.cornerRadius = 8;
-            btn.tag = i;
-            [btn addTarget:self action:@selector(menuTapped:) forControlEvents:UIControlEventTouchUpInside];
-            [self.button addSubview:btn];
-        }
-    } else {
-        // 收起
-        self.button.frame = CGRectMake(0, 0, 60, 60);
-        self.button.layer.cornerRadius = 30;
-        for (UIView *v in self.button.subviews) {
-            [v removeFromSuperview];
-        }
-        [self.button setTitle:@"抓" forState:UIControlStateNormal];
+        [alert addAction:[UIAlertAction actionWithTitle:@"清空日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [self clearLog];
+        }]];
+        
+        NSString *toggleTitle = g_tracer_enabled ? @"暂停抓取" : @"开启抓取";
+        [alert addAction:[UIAlertAction actionWithTitle:toggleTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [self toggleTracer];
+        }]];
+        
+        [alert addAction:[UIAlertAction actionWithTitle:@"关闭悬浮球" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+            [self closeTracer];
+        }]];
+        
+        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        
+        // iPad 适配
+        alert.popoverPresentationController.sourceView = self.button;
+        alert.popoverPresentationController.sourceRect = self.button.bounds;
+        
+        UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
+        [root presentViewController:alert animated:YES completion:nil];
+    } @catch (NSException *e) {
+        NSLog(@"GameTracer buttonTapped exception: %@", e);
     }
 }
 
-- (void)menuTapped:(UIButton *)sender {
-    switch (sender.tag) {
-        case 0: { // 导出日志
-            NSString *path = logFilePath();
-            NSString *content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
-            UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[content ?: @"日志为空"] applicationActivities:nil];
-            UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-            [root presentViewController:vc animated:YES completion:nil];
-            writeLog(@"用户导出日志");
-            break;
-        }
-        case 1: { // 清空日志
-            NSString *path = logFilePath();
-            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-            g_method_call_count = [NSMutableDictionary dictionary];
-            g_invoke_count = 0;
-            writeLog(@"日志已清空");
-            break;
-        }
-        case 2: { // 开启/暂停
-            g_tracer_enabled = !g_tracer_enabled;
-            writeLog(@"抓取状态: %@", g_tracer_enabled ? @"开启" : @"暂停");
-            break;
-        }
-        case 3: { // 关闭
-            g_tracer_enabled = NO; // 停止定时器
-            self.hidden = YES;
-            break;
-        }
+- (void)exportLog {
+    @try {
+        NSString *path = logFilePath();
+        NSString *content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+        if (!content || content.length == 0) content = @"日志为空";
+        
+        UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[content] applicationActivities:nil];
+        vc.popoverPresentationController.sourceView = self.button;
+        UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
+        [root presentViewController:vc animated:YES completion:nil];
+        writeLog(@"用户导出日志");
+    } @catch (NSException *e) {
+        NSLog(@"GameTracer exportLog exception: %@", e);
     }
-    [self buttonTapped]; // 收起菜单
+}
+
+- (void)clearLog {
+    @try {
+        NSString *path = logFilePath();
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        g_method_call_count = [NSMutableDictionary dictionary];
+        g_invoke_count = 0;
+        writeLog(@"日志已清空");
+    } @catch (NSException *e) {
+        NSLog(@"GameTracer clearLog exception: %@", e);
+    }
+}
+
+- (void)toggleTracer {
+    @try {
+        g_tracer_enabled = !g_tracer_enabled;
+        writeLog(@"抓取状态: %@", g_tracer_enabled ? @"开启" : @"暂停");
+    } @catch (NSException *e) {
+        NSLog(@"GameTracer toggleTracer exception: %@", e);
+    }
+}
+
+- (void)closeTracer {
+    @try {
+        g_tracer_enabled = NO;
+        self.hidden = YES;
+    } @catch (NSException *e) {
+        NSLog(@"GameTracer closeTracer exception: %@", e);
+    }
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)pan {
     CGPoint translation = [pan translationInView:self];
     CGPoint newCenter = CGPointMake(self.center.x + translation.x, self.center.y + translation.y);
     
-    // 限制在屏幕内
     CGSize screenSize = [UIScreen mainScreen].bounds.size;
     newCenter.x = MAX(30, MIN(screenSize.width - 30, newCenter.x));
     newCenter.y = MAX(30, MIN(screenSize.height - 30, newCenter.y));
