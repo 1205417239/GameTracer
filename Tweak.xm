@@ -219,8 +219,17 @@ static void monitor_timer_callback(NSTimer *timer) {
     }
 }
 
-#pragma mark - 悬浮按钮
-@interface TracerFloatingButton : UIWindow
+#pragma mark - 工具函数：获取最顶层 viewController
+static UIViewController *topViewController(void) {
+    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+    while (topVC.presentedViewController) {
+        topVC = topVC.presentedViewController;
+    }
+    return topVC;
+}
+
+#pragma mark - 悬浮按钮（用 UIView，点击更可靠）
+@interface TracerFloatingButton : UIView
 @property (nonatomic, strong) UIButton *button;
 @end
 
@@ -229,9 +238,8 @@ static void monitor_timer_callback(NSTimer *timer) {
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.windowLevel = UIWindowLevelAlert + 1000;
         self.backgroundColor = [UIColor clearColor];
-        self.hidden = NO;
+        self.userInteractionEnabled = YES;
         
         self.button = [UIButton buttonWithType:UIButtonTypeCustom];
         self.button.frame = CGRectMake(0, 0, 60, 60);
@@ -253,7 +261,7 @@ static void monitor_timer_callback(NSTimer *timer) {
 
 - (void)buttonTapped {
     @try {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"GameTracer 抓取工具" message:@"选择操作" preferredStyle:UIAlertControllerStyleActionSheet];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"GameTracer" message:@"选择操作" preferredStyle:UIAlertControllerStyleActionSheet];
         
         [alert addAction:[UIAlertAction actionWithTitle:@"导出日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             [self exportLog];
@@ -275,11 +283,17 @@ static void monitor_timer_callback(NSTimer *timer) {
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
         
         // iPad 适配
-        alert.popoverPresentationController.sourceView = self.button;
-        alert.popoverPresentationController.sourceRect = self.button.bounds;
+        if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+            alert.popoverPresentationController.sourceView = self.button;
+            alert.popoverPresentationController.sourceRect = self.button.bounds;
+        }
         
-        UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-        [root presentViewController:alert animated:YES completion:nil];
+        UIViewController *topVC = topViewController();
+        if (topVC) {
+            [topVC presentViewController:alert animated:YES completion:nil];
+        } else {
+            NSLog(@"GameTracer: topViewController is nil");
+        }
     } @catch (NSException *e) {
         NSLog(@"GameTracer buttonTapped exception: %@", e);
     }
@@ -287,15 +301,34 @@ static void monitor_timer_callback(NSTimer *timer) {
 
 - (void)exportLog {
     @try {
-        NSString *path = logFilePath();
-        NSString *content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+        NSString *srcPath = logFilePath();
+        NSString *content = [NSString stringWithContentsOfFile:srcPath encoding:NSUTF8StringEncoding error:nil];
         if (!content || content.length == 0) content = @"日志为空";
         
-        UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[content] applicationActivities:nil];
-        vc.popoverPresentationController.sourceView = self.button;
-        UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-        [root presentViewController:vc animated:YES completion:nil];
-        writeLog(@"用户导出日志");
+        // 写入临时文件，分享文件而不是文本
+        NSString *tempDir = NSTemporaryDirectory();
+        NSString *fileName = [NSString stringWithFormat:@"GameTracer_%@.txt", [NSDateFormatter localizedStringFromDate:[NSDate date] dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterMediumStyle]];
+        fileName = [fileName stringByReplacingOccurrencesOfString:@"/" withString:@"-"];
+        fileName = [fileName stringByReplacingOccurrencesOfString:@":" withString:@"-"];
+        NSString *tempPath = [tempDir stringByAppendingPathComponent:fileName];
+        [content writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        
+        NSURL *fileURL = [NSURL fileURLWithPath:tempPath];
+        
+        UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL] applicationActivities:nil];
+        
+        if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+            vc.popoverPresentationController.sourceView = self.button;
+            vc.popoverPresentationController.sourceRect = self.button.bounds;
+        }
+        
+        UIViewController *topVC = topViewController();
+        if (topVC) {
+            [topVC presentViewController:vc animated:YES completion:nil];
+            writeLog(@"用户导出日志（文件分享）");
+        } else {
+            NSLog(@"GameTracer: topViewController is nil for export");
+        }
     } @catch (NSException *e) {
         NSLog(@"GameTracer exportLog exception: %@", e);
     }
@@ -332,7 +365,7 @@ static void monitor_timer_callback(NSTimer *timer) {
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)pan {
-    CGPoint translation = [pan translationInView:self];
+    CGPoint translation = [pan translationInView:self.superview];
     CGPoint newCenter = CGPointMake(self.center.x + translation.x, self.center.y + translation.y);
     
     CGSize screenSize = [UIScreen mainScreen].bounds.size;
@@ -340,11 +373,10 @@ static void monitor_timer_callback(NSTimer *timer) {
     newCenter.y = MAX(30, MIN(screenSize.height - 30, newCenter.y));
     
     self.center = newCenter;
-    [pan setTranslation:CGPointZero inView:self];
+    [pan setTranslation:CGPointZero inView:self.superview];
 }
 
 @end
-
 #pragma mark - 初始化
 static TracerFloatingButton *g_floating_button = nil;
 static BOOL g_initialized = NO;
@@ -407,7 +439,16 @@ static void do_initialize(void) {
         // 显示悬浮按钮
         CGSize screenSize = [UIScreen mainScreen].bounds.size;
         g_floating_button = [[TracerFloatingButton alloc] initWithFrame:CGRectMake(screenSize.width - 80, 200, 60, 60)];
-        [g_floating_button makeKeyAndVisible];
+        UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
+        if (keyWin) {
+            [keyWin addSubview:g_floating_button];
+        } else {
+            // 如果 keyWindow 为 nil，延迟添加
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                UIWindow *win = [UIApplication sharedApplication].keyWindow;
+                if (win) [win addSubview:g_floating_button];
+            });
+        }
         
         writeLog(@"GameTracer 初始化完成，悬浮按钮已显示");
         
